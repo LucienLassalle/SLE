@@ -1,0 +1,13 @@
+---
+OPENSEARCH_IP: "https://opensearch.local:9200"
+
+myapp:
+  APPLICATION:
+    path_file: "/var/log/myapp/application.log"
+  
+  SECURITY:
+    path_file: "/var/log/myapp/security.log"
+  
+  AUDIT:
+    path_file: "/var/log/myapp/audit.log"
+    delimiter: "\n"

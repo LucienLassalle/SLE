@@ -1,0 +1,9 @@
+{
+    "LOKI_IP": "http://localhost:3100",
+    "JOURNALCTL": "on",
+    "JOURNALCTL_LABELS": {
+        "source": "systemd",
+        "datacenter": "local",
+        "environment": "dev"
+    }
+}

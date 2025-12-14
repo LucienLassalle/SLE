@@ -1,0 +1,14 @@
+GRAYLOG_IP: "http://graylog.local:12201"
+
+syslog:
+  SYSTEM:
+    path_file: "/var/log/syslog"
+
+auth:
+  LOGIN:
+    path_file: "/var/log/auth.log"
+    delimiter: "\n"
+
+kernel:
+  MESSAGES:
+    path_file: "/var/log/kern.log"

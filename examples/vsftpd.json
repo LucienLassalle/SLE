@@ -1,0 +1,15 @@
+{
+    "LOKI_IP": [
+        "10.10.10.10:3100",
+        "10.10.10.20:3100"
+    ],
+    "vsftpd": {
+        "XTERM": {
+            "path_file": "/var/log/vsftpd.log",
+            "delimiter": "\n"
+        },
+        "AUTH": {
+            "path_file": "/var/log/vsftpd-auth.log"
+        }
+    }
+}

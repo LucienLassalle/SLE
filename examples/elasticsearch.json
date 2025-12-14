@@ -1,0 +1,15 @@
+{
+    "ELASTIC_IP": "http://elasticsearch.local:9200",
+    "webapp": {
+        "ACCESS": {
+            "path_file": "/var/log/webapp/access.log",
+            "delimiter": "\n"
+        },
+        "ERROR": {
+            "path_file": "/var/log/webapp/error.log"
+        },
+        "DEBUG": {
+            "path_file": "/var/log/webapp/debug.log"
+        }
+    }
+}

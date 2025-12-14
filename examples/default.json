@@ -1,0 +1,4 @@
+{
+    "LOKI_IP": "http://localhost:3100",
+    "JOURNALCTL": "on"
+}

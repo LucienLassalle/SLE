@@ -1,0 +1,12 @@
+LOKI_IP: "http://grafana-loki.local:3100"
+
+apache2:
+  ACCESS:
+    path_file: "/var/log/apache2/access.log"
+  
+  ERROR:
+    path_file: "/var/log/apache2/error.log"
+
+auth:
+  LOGIN:
+    path_file: "/var/log/auth.log"

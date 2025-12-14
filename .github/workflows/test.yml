@@ -1,0 +1,257 @@
+name: SLE Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      loki:
+        image: grafana/loki:latest
+        ports:
+          - 3100:3100
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest pytest-cov flake8
+
+    - name: Check Python syntax
+      run: |
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics --exclude=.venv,venv,__pycache__
+
+    - name: Run unit tests
+      run: |
+        pytest tests/ -v --cov=. --cov-report=xml --cov-report=term-missing
+
+    - name: Prepare real log files for testing
+      run: |
+        mkdir -p /tmp/sle-test /tmp/logs
+        
+        # Standard newline logs
+        echo "Log entry 1" >> /tmp/logs/test1.log
+        echo "Log entry 2 with UTF-8: éàù" >> /tmp/logs/test1.log
+        echo "Log entry 3" >> /tmp/logs/test1.log
+        
+        # Custom delimiter logs
+        echo -n "Entry1||Entry2||Entry3||" > /tmp/logs/custom-delimiter.log
+        
+        # Tab delimited
+        echo -e "Tab1\tTab2\tTab3" > /tmp/logs/tab-delimited.log
+
+    - name: Test real Loki export with JSON config
+      run: |
+        cat > /tmp/sle-test/test.json << 'EOF'
+        {
+            "LOKI_IP": "http://localhost:3100",
+            "ci_test": {
+                "STANDARD": {
+                    "path_file": "/tmp/logs/test1.log",
+                    "delimiter": "\n",
+                    "labels": {
+                        "environment": "ci",
+                        "test_type": "standard"
+                    },
+                    "rate_limit": 1000
+                },
+                "CUSTOM_DELIMITER": {
+                    "path_file": "/tmp/logs/custom-delimiter.log",
+                    "delimiter": "||",
+                    "labels": {
+                        "delimiter_type": "custom"
+                    },
+                    "buffer_size": 10
+                }
+            }
+        }
+        EOF
+        
+        # Wait for Loki to be ready
+        echo "Waiting for Loki..."
+        for i in {1..30}; do
+          if curl -s http://localhost:3100/ready 2>/dev/null | grep -q "ready"; then
+            echo "✓ Loki is ready"
+            break
+          fi
+          echo "  Attempt $i/30..."
+          sleep 2
+        done
+        
+        # Test export
+        python3 << 'PYTEST'
+        import time
+        from config_loader import ConfigLoader
+        from exporters.factory import ExporterFactory
+        
+        # Load JSON config
+        loader = ConfigLoader('/tmp/sle-test')
+        configs = loader.load_configs()
+        
+        if not configs:
+            print('ERROR: No config loaded')
+            exit(1)
+        
+        print(f'✓ Loaded {len(configs)} config(s)')
+        config = configs[0]
+        print(f'  Backend: {config["exporter_type"]}')
+        print(f'  URLs: {[c["url"] for c in config["exporter_configs"]]}')
+        print(f'  Log entries: {len(config["log_entries"])}')
+        
+        # Create exporter (use first backend)
+        exporter = ExporterFactory.create(
+            config['exporter_type'],
+            config['exporter_configs'][0]
+        )
+        
+        if not exporter:
+            print('ERROR: Failed to create exporter')
+            exit(1)
+        
+        print(f'✓ Created {exporter.get_name()} exporter')
+        
+        # Test logs
+        test_logs = [
+            {'line': 'CI Test: Standard log 1', 'name': 'ci_test', 'subname': 'STANDARD', 'filepath': '/tmp/logs/test1.log'},
+            {'line': 'CI Test: Log with UTF-8 éàù', 'name': 'ci_test', 'subname': 'STANDARD', 'filepath': '/tmp/logs/test1.log'},
+            {'line': 'CI Test: Special chars !@#$%', 'name': 'ci_test', 'subname': 'STANDARD', 'filepath': '/tmp/logs/test1.log'},
+            {'line': 'Entry1', 'name': 'ci_test', 'subname': 'CUSTOM_DELIMITER', 'filepath': '/tmp/logs/custom-delimiter.log'},
+            {'line': 'Entry2', 'name': 'ci_test', 'subname': 'CUSTOM_DELIMITER', 'filepath': '/tmp/logs/custom-delimiter.log'},
+        ]
+        
+        print('\nSending logs to Loki...')
+        failed = []
+        for i, log in enumerate(test_logs, 1):
+            if exporter.send_log(log):
+                print(f'  {i}. ✓ {log["line"][:50]}')
+            else:
+                print(f'  {i}. ✗ {log["line"][:50]}')
+                failed.append(log)
+        
+        if failed:
+            print(f'\nERROR: {len(failed)} logs failed to send')
+            exit(1)
+        
+        print(f'\n✓ Successfully sent all {len(test_logs)} logs to Loki (JSON config)')
+        PYTEST
+
+    - name: Test real Loki export with YAML config
+      run: |
+        cat > /tmp/sle-test/test.yaml << 'EOF'
+        LOKI_IP: "http://localhost:3100"
+
+        yaml_test:
+          STANDARD:
+            path_file: "/tmp/logs/test1.log"
+            delimiter: "\n"
+            labels:
+              format: "yaml"
+              team: "devops"
+            rate_limit: 500
+          
+          TAB_DELIMITED:
+            path_file: "/tmp/logs/tab-delimited.log"
+            delimiter: "\t"
+            labels:
+              delimiter_type: "tab"
+            buffer_size: 5
+        EOF
+        
+        python3 << 'PYTEST'
+        from config_loader import ConfigLoader
+        from exporters.factory import ExporterFactory
+        
+        # Load configs (should have both JSON and YAML now)
+        loader = ConfigLoader('/tmp/sle-test')
+        configs = loader.load_configs()
+        
+        yaml_config = None
+        for config in configs:
+            if 'yaml' in config['source'].lower():
+                yaml_config = config
+                break
+        
+        if not yaml_config:
+            print('ERROR: YAML config not loaded')
+            exit(1)
+        
+        print(f'✓ Loaded YAML config')
+        print(f'  Log entries: {len(yaml_config["log_entries"])}')
+        
+        # Create exporter (use first backend)
+        exporter = ExporterFactory.create(
+            yaml_config['exporter_type'],
+            yaml_config['exporter_configs'][0]
+        )
+        
+        # Test logs
+        test_logs = [
+            {'line': 'YAML Test 1', 'name': 'yaml_test', 'subname': 'STANDARD', 'filepath': '/tmp/logs/test1.log'},
+            {'line': 'YAML Test 2', 'name': 'yaml_test', 'subname': 'STANDARD', 'filepath': '/tmp/logs/test1.log'},
+            {'line': 'Tab1', 'name': 'yaml_test', 'subname': 'TAB_DELIMITED', 'filepath': '/tmp/logs/tab-delimited.log'},
+        ]
+        
+        print('\nSending logs to Loki via YAML config...')
+        failed = []
+        for i, log in enumerate(test_logs, 1):
+            if exporter.send_log(log):
+                print(f'  {i}. ✓ {log["line"]}')
+            else:
+                print(f'  {i}. ✗ {log["line"]}')
+                failed.append(log)
+        
+        if failed:
+            print(f'\nERROR: {len(failed)} logs failed to send')
+            exit(1)
+        
+        print(f'\n✓ Successfully sent all {len(test_logs)} logs to Loki (YAML config)')
+        PYTEST
+
+    - name: Validate example configurations
+      run: |
+        python3 << 'PYTEST'
+        import sys
+        from pathlib import Path
+        from config_loader import ConfigLoader
+
+        loader = ConfigLoader('examples')
+        configs = loader.load_configs()
+
+        if not configs:
+            print('ERROR: No valid configurations in examples/')
+            sys.exit(1)
+
+        print(f'✓ Validated {len(configs)} example config(s)')
+        for config in configs:
+            print(f'  - {Path(config["source"]).name}: {config["exporter_type"]}')
+        PYTEST
+
+    - name: Verify all exporters registered
+      run: |
+        python3 << 'PYTEST'
+        from exporters.factory import ExporterFactory
+
+        exporters = ExporterFactory.list_exporters()
+        required = ['loki', 'elastic', 'elasticsearch']
+
+        missing = [e for e in required if e not in exporters]
+        if missing:
+            print(f'ERROR: Missing exporters: {missing}')
+            exit(1)
+
+        print(f'✓ All {len(exporters)} exporters registered')
+        PYTEST

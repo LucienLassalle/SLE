@@ -1,0 +1,19 @@
+[Unit]
+Description=SLE - Simple Log Exporter
+Documentation=https://github.com/LucienLassalle/SLE
+After=network.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/sle
+ExecStart=/usr/bin/python3 /opt/sle/sle.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=sle
+
+[Install]
+WantedBy=multi-user.target

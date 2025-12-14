@@ -1,0 +1,22 @@
+{
+    "LOKI_IP": [
+        "10.10.10.10:3100",
+        "10.10.10.10:3100"
+    ],
+    "apache2": {
+        "ACCESS": {
+            "path_file": "/var/log/apache2/access.log",
+            "labels": {
+                "environment": "production",
+                "team": "webteam"
+            },
+            "rate_limit": 1000
+        },
+        "ERROR": {
+            "path_file": "/var/log/apache2/error.log"
+        },
+        "LOGIN": {
+            "path_file": "/var/log/auth.log"
+        }
+    }
+}

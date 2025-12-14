@@ -1,0 +1,23 @@
+---
+# Multiple Loki instances for high availability
+LOKI_IP:
+  - "10.10.10.10:3100"
+  - "10.10.10.11:3100"
+
+nginx:
+  ACCESS:
+    path_file: "/var/log/nginx/access.log"
+    delimiter: "\n"
+    labels:
+      environment: "production"
+      datacenter: "eu-west-1"
+      team: "ops"
+    buffer_size: 100
+  
+  ERROR:
+    path_file: "/var/log/nginx/error.log"
+    delimiter: "\n"
+
+syslog:
+  SYSTEM:
+    path_file: "/var/log/syslog"
