@@ -1,0 +1,9 @@
+{
+    "_IMPORTANT": "This example shows QUEUE_SIZE configuration",
+    "_WARNING": "QUEUE_SIZE only works in files named 'default.json' or 'default.yml'",
+    "_USAGE": "Copy this to /etc/sle.d/default.json to use it",
+    "LOKI_IP": "http://localhost:3100",
+    "QUEUE_SIZE": 15000,
+    "AUTO_RELOAD": 0,
+    "JOURNALCTL": "off"
+}
