@@ -14,13 +14,14 @@ Lightweight Python service that exports system logs to multiple backends in real
 ✅ **Custom labels** - Add metadata to logs (environment, team, etc.)  
 ✅ **Multiple formats** - JSON, YAML, YML configuration files  
 ✅ **Resilient** - Continues on errors, reconnects automatically  
+✅ **Glob patterns** - Wildcard support for log file paths (`/var/log/*.log`, `/app/*/logs/*.log`)  
+✅ **Rate limiting** - Control log throughput per source (logs/second)  
+✅ **Batching** - Group logs for efficient sending (configurable buffer size)  
 
 ## What SLE Does NOT Do
 
 ❌ **No log rotation** - Use `logrotate` for that  
 ❌ **No log parsing/filtering** - Sends raw logs (except level extraction)  
-❌ **No batching yet** - Sends logs one by one (buffer_size parsed but not implemented)  
-❌ **No rate limiting yet** - rate_limit parsed but not implemented  
 ❌ **No encryption** - Use TLS-enabled backends or reverse proxy  
 ❌ **No authentication** - Relies on backend authentication  
 ❌ **No log archival** - Use backend retention policies  
@@ -142,11 +143,55 @@ SERVICE_NAME (mandatory) → Service identifier
 CATEGORY (mandatory)     → Log category
   ↓
 path_file (mandatory)    → Absolute path to log file
+                           Supports glob patterns: *, ?, []
 delimiter (optional)     → Line delimiter (default: \n)
 labels (optional)        → Custom labels dict
-rate_limit (optional)    → Max logs/sec (parsed, not implemented)
-buffer_size (optional)   → Batch size (parsed, not implemented)
+rate_limit (optional)    → Max logs/sec (enforced per file)
+buffer_size (optional)   → Batch size (logs grouped before sending)
 ```
+
+### Glob Pattern Support (Wildcards)
+
+**SLE supports wildcards in file paths** to monitor multiple files matching a pattern:
+
+- `*` - Matches any characters (except path separator)
+- `?` - Matches a single character
+- `[]` - Matches character ranges
+- `**` - Matches any files and zero or more directories (recursive)
+
+**Examples:**
+
+```json
+{
+    "LOKI_IP": "http://loki:3100",
+    "docker": {
+        "CONTAINERS": {
+            "path_file": "/var/lib/docker/containers/*/*.log"
+        }
+    },
+    "apps": {
+        "ALL_LOGS": {
+            "path_file": "/var/log/apps/**/*.log"
+        }
+    },
+    "nginx": {
+        "ACCESS": {
+            "path_file": "/var/log/nginx/access*.log"
+        }
+    }
+}
+```
+
+**Benefits:**
+- ✅ Monitor all files matching pattern automatically
+- ✅ No need to restart when new files appear that match pattern
+- ✅ Perfect for container logs, rotated logs, multi-instance apps
+- ✅ Each matched file is monitored independently
+
+**Notes:**
+- Pattern is resolved at startup - new files created after startup won't be monitored (restart required)
+- If pattern matches no files, a warning is logged and the entry is skipped
+- Each matched file gets its own watcher and rate limit/buffer (if specified)
 
 ### File-Based Log Example (JSON)
 
@@ -223,7 +268,8 @@ syslog:
     labels:
       environment: "staging"
       component: "system"
-    rate_limit: 500(s) - **String or List** - Type extracted from name | `"loki:3100"` or `["loki-1:3100", "loki-2:3100"]
+    rate_limit: 500
+    buffer_size: 50
 
 auth:
   LOGIN:
@@ -240,15 +286,17 @@ auth:
 | `*_IP` | Optional | Backend endpoint - Type extracted from name | `LOKI_IP`, `ELASTIC_IP`, `KAFKA_IP` |
 | `service_name` | **Mandatory** | Service identifier | `nginx`, `apache2`, `myapp` |
 | `category` | **Mandatory** | Log category | `ACCESS`, `ERROR`, `SYSTEM` |
-| `path_file` | **Mandatory** | Absolute path to log file | `/var/log/nginx/access.log` |
+| `path_file` | **Mandatory** | Absolute path to log file (supports wildcards: `*`, `?`, `[]`, `**`) | `/var/log/nginx/*.log`, `/app/**/logs/*.log` |
 | `delimiter` | Optional | Line delimiter (default: `\n`) | `\n`, `\r\n`, `\|\|` |
 | `labels` | Optional | Custom labels - **any key/value pairs you want** | `{"environment": "prod"}`, `{"team": "ops"}`, `{"priority": "high"}` |
-| `rate_limit` | Optional | Max logs per second (int/float) - **parsed but not implemented** | `1000`, `500.5` |
-| `buffer_size` | Optional | Batch size (int) - **parsed but not implemented** | `100`, `50` |
+| `rate_limit` | Optional | Max logs per second (int/float) - **enforced per file** | `1000`, `500.5` |
+| `buffer_size` | Optional | Batch size (int) - **logs grouped before sending** | `100`, `50` |
 
 **Important Notes:**
 - `labels` can contain **any custom key/value pairs** - they become searchable labels in your backend (e.g., Loki)
-- `rate_limit` and `buffer_size` are parsed from config but not yet enforced in queue processing
+- `rate_limit` uses token bucket algorithm - excess logs are dropped with debug message
+- `buffer_size` groups logs for efficient batch sending - buffers are flushed when full or periodically
+- Both `rate_limit` and `buffer_size` are applied **per matched file** when using glob patterns
 
 ### Supported Backend Fields
 
@@ -376,4 +424,4 @@ sudo systemctl daemon-reload
 
 ---
 
-**Version**: 1.0.0
+**Version**: 1.0.1

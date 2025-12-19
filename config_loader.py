@@ -7,6 +7,7 @@ import os
 import json
 import yaml
 import logging
+import glob as glob_module
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
@@ -239,15 +240,37 @@ class ConfigLoader:
                     logger.warning(f"Entry '{name}.{subname}' invalid buffer_size: {buffer_size}, ignoring")
                     buffer_size = None
                 
-                log_entries.append({
-                    'name': name,
-                    'subname': subname,
-                    'path_file': path_file,
-                    'delimiter': delimiter,
-                    'labels': labels,
-                    'rate_limit': rate_limit,
-                    'buffer_size': buffer_size
-                })
+                # Check if path contains wildcards (glob pattern)
+                if '*' in path_file or '?' in path_file or '[' in path_file:
+                    # Resolve glob pattern to actual files
+                    matched_files = glob_module.glob(path_file, recursive=True)
+                    if not matched_files:
+                        logger.warning(f"Entry '{name}.{subname}' glob pattern '{path_file}' matched no files")
+                        continue
+                    
+                    logger.info(f"Entry '{name}.{subname}' glob pattern '{path_file}' matched {len(matched_files)} file(s)")
+                    # Create an entry for each matched file
+                    for matched_file in matched_files:
+                        log_entries.append({
+                            'name': name,
+                            'subname': subname,
+                            'path_file': matched_file,
+                            'delimiter': delimiter,
+                            'labels': labels,
+                            'rate_limit': rate_limit,
+                            'buffer_size': buffer_size
+                        })
+                else:
+                    # Regular file path (no wildcards)
+                    log_entries.append({
+                        'name': name,
+                        'subname': subname,
+                        'path_file': path_file,
+                        'delimiter': delimiter,
+                        'labels': labels,
+                        'rate_limit': rate_limit,
+                        'buffer_size': buffer_size
+                    })
         
         if not log_entries:
             # If it's default.json/yml, it's OK to have no log entries (journald only)

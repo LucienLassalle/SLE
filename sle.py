@@ -8,8 +8,10 @@ import sys
 import logging
 import argparse
 import threading
+import time
 from pathlib import Path
 from queue import Queue
+from collections import defaultdict
 
 from config_loader import ConfigLoader
 from file_watcher import LogFileWatcher
@@ -35,6 +37,8 @@ class SLE:
         self.queue = Queue()
         self.running = False
         self.exporters = {}
+        self.rate_limiters = {}  # Track rate limits per source
+        self.buffers = {}  # Track log buffers per source
         
     def start(self):
         """Start the service"""
@@ -97,6 +101,22 @@ class SLE:
                 )
                 self.watchers.append(watcher)
                 
+                # Initialize rate limiter if specified
+                source_key = f"{entry['name']}:{entry['subname']}:{entry['path_file']}"
+                if entry.get('rate_limit'):
+                    self.rate_limiters[source_key] = {
+                        'max_rate': entry['rate_limit'],
+                        'tokens': entry['rate_limit'],  # Start with full bucket
+                        'last_update': time.time()
+                    }
+                
+                # Initialize buffer if specified
+                if entry.get('buffer_size'):
+                    self.buffers[source_key] = {
+                        'max_size': entry['buffer_size'],
+                        'logs': []
+                    }
+                
                 # Create a thread for each watcher
                 thread = threading.Thread(
                     target=watcher.start,
@@ -121,11 +141,31 @@ class SLE:
                 if not self.queue.empty():
                     log_entry = self.queue.get(timeout=1)
                     
-                    # Send to all exporters
-                    for exporter in self.exporters.values():
-                        exporter.send_log(log_entry)
+                    # Generate source key for rate limiting and buffering
+                    source_key = f"{log_entry['name']}:{log_entry['subname']}:{log_entry['filepath']}"
+                    
+                    # Check rate limit
+                    if source_key in self.rate_limiters:
+                        if not self._check_rate_limit(source_key):
+                            # Rate limit exceeded, drop log or wait
+                            logger.debug(f"Rate limit exceeded for {source_key}, dropping log")
+                            continue
+                    
+                    # Check if buffering is enabled
+                    if source_key in self.buffers:
+                        # Add to buffer
+                        self.buffers[source_key]['logs'].append(log_entry)
+                        
+                        # Send batch if buffer is full
+                        if len(self.buffers[source_key]['logs']) >= self.buffers[source_key]['max_size']:
+                            self._flush_buffer(source_key)
+                    else:
+                        # Send immediately
+                        for exporter in self.exporters.values():
+                            exporter.send_log(log_entry)
                 else:
-                    import time
+                    # Flush all partial buffers periodically
+                    self._flush_all_buffers()
                     time.sleep(0.1)
                     
             except KeyboardInterrupt:
@@ -134,13 +174,57 @@ class SLE:
                 break
             except Exception as e:
                 logger.error(f"Error processing queue: {e}")
-                import time
                 time.sleep(1)
+    
+    def _check_rate_limit(self, source_key: str) -> bool:
+        """Check if log can be sent based on rate limit (token bucket algorithm)"""
+        limiter = self.rate_limiters[source_key]
+        now = time.time()
+        elapsed = now - limiter['last_update']
+        
+        # Refill tokens based on elapsed time
+        limiter['tokens'] = min(
+            limiter['max_rate'],
+            limiter['tokens'] + elapsed * limiter['max_rate']
+        )
+        limiter['last_update'] = now
+        
+        # Check if we have tokens available
+        if limiter['tokens'] >= 1.0:
+            limiter['tokens'] -= 1.0
+            return True
+        return False
+    
+    def _flush_buffer(self, source_key: str):
+        """Flush buffered logs for a specific source"""
+        if source_key not in self.buffers or not self.buffers[source_key]['logs']:
+            return
+        
+        logs = self.buffers[source_key]['logs']
+        logger.debug(f"Flushing {len(logs)} buffered logs from {source_key}")
+        
+        # Send all buffered logs
+        for log_entry in logs:
+            for exporter in self.exporters.values():
+                exporter.send_log(log_entry)
+        
+        # Clear buffer
+        self.buffers[source_key]['logs'] = []
+    
+    def _flush_all_buffers(self):
+        """Flush all partial buffers"""
+        for source_key in list(self.buffers.keys()):
+            if self.buffers[source_key]['logs']:
+                self._flush_buffer(source_key)
     
     def stop(self):
         """Stop the service"""
         logger.info("Stopping SLE...")
         self.running = False
+        
+        # Flush all remaining buffers before stopping
+        logger.info("Flushing remaining buffers...")
+        self._flush_all_buffers()
         
         for watcher in self.watchers:
             watcher.stop()
