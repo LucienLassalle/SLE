@@ -1,0 +1,29 @@
+LOKI_IP: "http://localhost:3100"
+
+# Multiple app logs with glob pattern
+apps:
+  ALL_LOGS:
+    path_file: "/var/log/apps/**/*.log"
+    labels:
+      environment: "staging"
+      source: "applications"
+    rate_limit: 500
+    buffer_size: 100
+    disk_buffer: "DISK"
+
+# Nginx logs with wildcard
+nginx:
+  ACCESS:
+    path_file: "/var/log/nginx/access*.log"
+    labels:
+      service: "nginx"
+      type: "access"
+    disk_buffer: "DROP"
+  
+  ERROR:
+    path_file: "/var/log/nginx/error*.log"
+    labels:
+      service: "nginx"
+      type: "error"
+      severity: "high"
+    disk_buffer: "DISK"

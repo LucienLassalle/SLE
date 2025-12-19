@@ -1,0 +1,15 @@
+{
+    "LOKI_IP": "http://localhost:3100",
+    "docker": {
+        "CONTAINERS": {
+            "path_file": "/var/lib/docker/containers/*/*.log",
+            "labels": {
+                "source": "docker",
+                "environment": "production"
+            },
+            "rate_limit": 1000,
+            "buffer_size": 50,
+            "disk_buffer": "DISK"
+        }
+    }
+}

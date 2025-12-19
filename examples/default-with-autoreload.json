@@ -1,0 +1,39 @@
+{
+    "LOKI_IP": "http://localhost:3100",
+    "_comment": "AUTO_RELOAD enables periodic checking for new files matching glob patterns",
+    "AUTO_RELOAD": 300,
+    "_comment2": "QUEUE_SIZE limits queue size - logs saved to disk if disk_buffer: DISK",
+    "QUEUE_SIZE": 10000,
+    "JOURNALCTL": "off",
+    "nginx": {
+        "ACCESS": {
+            "path_file": "/var/log/nginx/access.log",
+            "labels": {
+                "environment": "production",
+                "service": "nginx"
+            },
+            "rate_limit": 1000,
+            "buffer_size": 50,
+            "disk_buffer": "DISK"
+        },
+        "ERROR": {
+            "path_file": "/var/log/nginx/error.log",
+            "labels": {
+                "environment": "production",
+                "service": "nginx",
+                "severity": "high"
+            },
+            "disk_buffer": "DISK"
+        }
+    },
+    "apache": {
+        "ACCESS": {
+            "path_file": "/var/log/apache2/access*.log",
+            "labels": {
+                "service": "apache"
+            },
+            "rate_limit": 500,
+            "disk_buffer": "DROP"
+        }
+    }
+}

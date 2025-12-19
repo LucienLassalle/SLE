@@ -27,6 +27,8 @@ class ConfigLoader:
         journald_enabled = False  # Default: journald disabled unless default.json exists
         journald_labels = {}
         default_file_found = False
+        auto_reload_interval = 0  # Default: auto-reload disabled
+        queue_size = None  # Default: None (no limit, but 5000 before clear)
         
         if not os.path.exists(self.config_dir):
             logger.error(f"Configuration directory does not exist: {self.config_dir}")
@@ -83,6 +85,24 @@ class ConfigLoader:
                         # Extract labels for journald if present
                         if 'JOURNALCTL_LABELS' in config and isinstance(config['JOURNALCTL_LABELS'], dict):
                             journald_labels = config['JOURNALCTL_LABELS']
+                        
+                        # Check for auto-reload interval (in seconds)
+                        if 'AUTO_RELOAD' in config:
+                            reload_value = config['AUTO_RELOAD']
+                            if isinstance(reload_value, (int, float)) and reload_value > 0:
+                                auto_reload_interval = int(reload_value)
+                                logger.info(f"Auto-reload enabled: every {auto_reload_interval} seconds")
+                            else:
+                                logger.warning(f"Invalid AUTO_RELOAD value: {reload_value}, must be positive number")
+                        
+                        # Check for queue size limit
+                        if 'QUEUE_SIZE' in config:
+                            queue_value = config['QUEUE_SIZE']
+                            if isinstance(queue_value, int) and queue_value > 0:
+                                queue_size = queue_value
+                                logger.info(f"Queue size limit: {queue_size} logs")
+                            else:
+                                logger.warning(f"Invalid QUEUE_SIZE value: {queue_value}, must be positive integer")
                 except Exception as e:
                     logger.error(f"Error loading default config {config_file}: {e}")
         
@@ -125,6 +145,11 @@ class ConfigLoader:
                 logger.info(f"Journald monitoring enabled, using {backend_type} backend with {len(backend_configs)} destination(s)")
             else:
                 logger.error("Journald enabled but no backend configuration found")
+        
+        # Add metadata to all configs
+        for config in configs:
+            config['auto_reload_interval'] = auto_reload_interval
+            config['queue_size'] = queue_size
         
         return configs
     
@@ -240,6 +265,12 @@ class ConfigLoader:
                     logger.warning(f"Entry '{name}.{subname}' invalid buffer_size: {buffer_size}, ignoring")
                     buffer_size = None
                 
+                # Optional disk_buffer (DROP or DISK)
+                disk_buffer = settings.get('disk_buffer', 'DROP').upper()
+                if disk_buffer not in ['DROP', 'DISK']:
+                    logger.warning(f"Entry '{name}.{subname}' invalid disk_buffer: {disk_buffer}, defaulting to DROP")
+                    disk_buffer = 'DROP'
+                
                 # Check if path contains wildcards (glob pattern)
                 if '*' in path_file or '?' in path_file or '[' in path_file:
                     # Resolve glob pattern to actual files
@@ -258,7 +289,8 @@ class ConfigLoader:
                             'delimiter': delimiter,
                             'labels': labels,
                             'rate_limit': rate_limit,
-                            'buffer_size': buffer_size
+                            'buffer_size': buffer_size,
+                            'disk_buffer': disk_buffer
                         })
                 else:
                     # Regular file path (no wildcards)
@@ -269,7 +301,8 @@ class ConfigLoader:
                         'delimiter': delimiter,
                         'labels': labels,
                         'rate_limit': rate_limit,
-                        'buffer_size': buffer_size
+                        'buffer_size': buffer_size,
+                        'disk_buffer': disk_buffer
                     })
         
         if not log_entries:
