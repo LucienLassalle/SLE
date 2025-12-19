@@ -43,12 +43,28 @@ class ConfigLoader:
         logger.info(f"Found {len(config_files)} configuration file(s)")
         
         # First pass: check default.json or default.yml for JOURNALCTL setting
+        default_backend_type = None
+        default_backend_configs = []
         for config_file in config_files:
             if config_file.stem == 'default':
                 default_file_found = True
                 try:
                     config = self._load_file(config_file)
                     if config:
+                        # Extract backend config from default.json
+                        for key in config.keys():
+                            if key.endswith('_IP'):
+                                backend_value = config[key]
+                                if backend_value:
+                                    default_backend_type = key[:-3].lower()
+                                    backend_urls = backend_value if isinstance(backend_value, list) else [backend_value]
+                                    for url in backend_urls:
+                                        if url:
+                                            if not url.startswith(('http://', 'https://')):
+                                                url = f"http://{url}"
+                                            default_backend_configs.append({'url': url})
+                                break
+                        
                         # Check if JOURNALCTL is explicitly set
                         if 'JOURNALCTL' in config:
                             journalctl_value = config['JOURNALCTL']
@@ -86,20 +102,28 @@ class ConfigLoader:
                 continue
         
         # Add journald config if enabled
-        if journald_enabled and configs:
-            # Use the first backend found
-            first_backend = configs[0]['exporter_type']
-            first_backend_configs = configs[0]['exporter_configs']
+        if journald_enabled:
+            # Use backend from default.json if available, otherwise from first config
+            backend_type = default_backend_type
+            backend_configs = default_backend_configs
             
-            configs.append({
-                'exporter_type': first_backend,
-                'exporter_configs': first_backend_configs,
-                'log_entries': [],
-                'source': 'journald',
-                'journald_enabled': True,
-                'journald_labels': journald_labels
-            })
-            logger.info(f"Journald monitoring enabled, using {first_backend} backend with {len(first_backend_configs)} destination(s)")
+            if not backend_type and configs:
+                # Fallback to first config's backend
+                backend_type = configs[0]['exporter_type']
+                backend_configs = configs[0]['exporter_configs']
+            
+            if backend_type and backend_configs:
+                configs.append({
+                    'exporter_type': backend_type,
+                    'exporter_configs': backend_configs,
+                    'log_entries': [],
+                    'source': 'journald',
+                    'journald_enabled': True,
+                    'journald_labels': journald_labels
+                })
+                logger.info(f"Journald monitoring enabled, using {backend_type} backend with {len(backend_configs)} destination(s)")
+            else:
+                logger.error("Journald enabled but no backend configuration found")
         
         return configs
     
@@ -171,8 +195,8 @@ class ConfigLoader:
         # Parse log entries
         log_entries = []
         for name, subconfigs in config.items():
-            # Skip backend configuration keys
-            if name.endswith('_IP'):
+            # Skip backend configuration keys and journald settings
+            if name.endswith('_IP') or name in ['JOURNALCTL', 'JOURNALCTL_LABELS']:
                 continue
             
             if not isinstance(subconfigs, dict):
@@ -226,7 +250,12 @@ class ConfigLoader:
                 })
         
         if not log_entries:
-            logger.warning(f"No valid log entries found in {source}")
+            # If it's default.json/yml, it's OK to have no log entries (journald only)
+            is_default = 'default.json' in source or 'default.yml' in source or 'default.yaml' in source
+            if not is_default:
+                logger.warning(f"No valid log entries found in {source}")
+                return None
+            # For default.json with no log entries, just skip it (journald will be added separately)
             return None
         
         return {
